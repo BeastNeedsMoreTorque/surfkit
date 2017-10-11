@@ -5,8 +5,60 @@
 
 html{
   body {
+    background-color: #fafafa;
+
+    header.site{
+      height: 42px;
+      width: 100%;
+      position: fixed;
+      top: 0px;
+      left: 0px;
+      right: 0px;
+      background-color: @panel-bg;
+      box-shadow: 2px 2px 10px #888;
+      z-index:100;
+
+    }
+    div.wrapper{
+      display: flex;
+      justify-content: center;
+      div.content {
+        width: 100%;
+        max-width: 987px;
+      }
+    }
 
     .chat-module {
+      background-color: white;
+      .entry{
+        display:flex;
+        :last-child{
+          flex: 1 100%;
+        }
+        .avatar{
+          width: 36px;
+          height: 36px;
+          border-radius: 5px;
+          border: 2px solid white;
+          margin: 5px;
+        }
+        span{
+          margin-left: 5px;
+          margin-top: 5px;
+          font-size: 12px;
+          display: block;
+        }
+        .uname{
+          font-weight: bold;
+          display:inline-block;
+        }
+        .time{
+          font-weight: bold;
+          display:inline-block;
+          color: @panel-inner-border;
+          text-transform: uppercase;
+        }
+      }
       .chats {
         position: fixed;
         bottom: 0px;
@@ -17,8 +69,10 @@ html{
           .panel;
           .panel-default;
           >header{
-
+            display: flex;
+            flex-wrap: nowrap;
             >span{
+              flex-grow: 1;
               padding: 5px 10px;
               color: @input-color;
               text-overflow: ellipsis;
@@ -27,18 +81,15 @@ html{
             }
             >i{
               color: @input-color;
+              padding: 10px;
             }
             .panel-heading;
             position: relative;
             border-bottom: 1px solid @panel-inner-border;
-            :last-child{
-              position: absolute;
-              top:3px;
-              right: 10px;
-            }
           }
           .friend-list{
             position: absolute;
+            background-color: @panel-bg;
             > div{
               .list-group;
               background-color: @panel-bg;
@@ -49,9 +100,12 @@ html{
                 border-bottom: 1px solid  @panel-inner-border;
                 .list-group-item;
                 .avatar{
-                  width: 32px;
-                  height: 32px;
+                  width: 24px;
+                  height: 24px;
                 }
+              }
+              .friend-card.active{
+                background-color: @panel-success-heading-bg;
               }
             }
           }
@@ -68,37 +122,9 @@ html{
                 padding:5px;
               }
             }
-            .entry{
-              display:flex;
-              :last-child{
-                flex: 1 100%;
-              }
-              .avatar{
-                width: 36px;
-                height: 36px;
-                border-radius: 5px;
-                border: 2px solid white;
-                margin: 5px;
-              }
-              span{
-                margin-left: 5px;
-                margin-top: 5px;
-                font-size: 12px;
-                display: block;
-              }
-              .uname{
-                font-weight: bold;
-                display:inline-block;
-              }
-              .time{
-                font-weight: bold;
-                display:inline-block;
-                color: @panel-inner-border;
-                text-transform: uppercase;
-              }
-            }
           }
           .cntrls{
+
             :first-child{
               border-radius: 0px;
               border-left:0px;
@@ -111,8 +137,9 @@ html{
         }
       }
       .chat-cnt {
+
         position: fixed;
-        top: 0px;
+        top: 42px;
         right: 0px;
         width: 200px;
         bottom: 0px;
@@ -127,11 +154,13 @@ html{
 
 
     .friend-card {
-      padding: 10px;
+      padding: 5px;
+      background-color: @panel-bg;
+      height: 100%;
       .avatar {
-        width: 48px;
-        height: 48px;
-        border-radius: 24px;
+        width: 36px;
+        height: 36px;
+        border-radius: 18px;
         border: 2px solid white;
       }
       span {

@@ -1,5 +1,6 @@
 package io.surfkit.modules
 
+import com.typesafe.config.ConfigFactory
 import slick.driver.PostgresDriver.api._
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -14,8 +15,9 @@ import io.surfkit.model.Auth._
 
 object HangTenSlick{
 
-  val db = Database.forURL("jdbc:postgresql://localhost:5432/sktest", user = "postgres", password = "Neverdull42",
-    driver = "org.postgresql.Driver",  executor = AsyncExecutor("executor1", numThreads=10, queueSize=1000))
+  val appConfig = ConfigFactory.load()
+  val db = Database.forURL(appConfig.getString("database.jdbc.connection"), user = appConfig.getString("database.jdbc.user"), password = appConfig.getString("database.jdbc.pass"),
+    driver = appConfig.getString("database.jdbc.driver"),  executor = AsyncExecutor("executor1", numThreads=10, queueSize=1000))
   // Definition of the Provider table
   class SurfKitUser(tag: Tag) extends Table[Auth.SurfKitUser](tag, "Users") {
     def id = column[Long]("user_id", O.PrimaryKey, O.AutoInc)
@@ -176,6 +178,10 @@ object HangTenSlick{
   def getProvider(app:String, providerId: String, userId: String) = {
     db.run( providers.filter { p => (p.appId === app && p.providerId === providerId && p.userId === userId)}.result )
   }
+  def getProviderForUser(uId:Long, app:String, providerId: String) = {
+    db.run( providers.filter { p => (p.appId === app && p.providerId === providerId && p.userKey === uId)}.result )
+  }
+
   def saveProvider(p:Auth.ProviderProfile):Future[Long] = {
     println("RUNNING SAVE")
     val userId = (users returning users.map(_.id)) += Auth.SurfKitUser(0,"token", p.fullName, p.avatarUrl,p.email)

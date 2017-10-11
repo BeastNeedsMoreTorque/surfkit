@@ -2,18 +2,19 @@ package io.surfkit.core.rabbitmq
 
 import akka.stream.actor.ActorPublisher
 import akka.stream.scaladsl.{Source, Sink, Flow}
-import akka.stream.ActorFlowMaterializer
+import akka.stream.{ActorFlowMaterializerSettings, Supervision, ActorFlowMaterializer}
 import io.surfkit.model._
 import play.api.libs.json.{JsArray, Format, Json}
 
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
-import akka.actor.{ActorLogging, Props}
+import akka.actor._
 import akka.util.ByteString
 
 import com.rabbitmq.client._
 
 import scala.concurrent.Future
+import scala.util.Try
 
 object RabbitModuleConsumer {
 
@@ -24,12 +25,10 @@ object RabbitModuleConsumer {
     Props(new RabbitModuleConsumer(module, channel, mapper))
 }
 
-
 class RabbitModuleConsumer(val module: String, val channel: Channel, val mapper: (Api.Request) => Future[Api.Result]) extends ActorPublisher[Api.Request] with ActorLogging {
   import akka.stream.actor.ActorPublisherMessage._
   import io.surfkit.core.rabbitmq.RabbitModuleConsumer._
 
-  implicit val materializer = ActorFlowMaterializer()
 
   val MaxBufferSize = 100
   var buf = Vector.empty[Api.Request]
@@ -44,6 +43,23 @@ class RabbitModuleConsumer(val module: String, val channel: Channel, val mapper:
     channel.queueBind(queue, sysExchange, queue)
     channel.basicQos(1)
   }
+
+
+  val decider: Supervision.Decider = {
+    case t:Throwable  =>
+      println("ERROR: ... resuming stream")
+      log.error(t, "ERROR in akka stream")
+      Supervision.Resume
+    case ex =>
+      println("ERROR: ... resuming stream")
+      Supervision.Resume
+  }
+
+  implicit val materializer = ActorFlowMaterializer(
+    ActorFlowMaterializerSettings(context.system).withSupervisionStrategy(decider)
+  )
+
+
 
   val source = Source[Api.Request](Props[RabbitModuleConsumer](this))
   source
@@ -84,7 +100,7 @@ class RabbitModuleConsumer(val module: String, val channel: Channel, val mapper:
       val apiReq = upickle.read[Api.Request](payload)
       println(s"apiReq: $apiReq")
 
-      self ! Api.Request( apiReq.module, apiReq.op, apiReq.data, Api.Route(properties.getCorrelationId, properties.getReplyTo(), envelope.getDeliveryTag) )
+      self ! Api.Request(apiReq.appId, apiReq.module, apiReq.op, apiReq.data, Api.Route(properties.getCorrelationId, properties.getReplyTo(), envelope.getDeliveryTag) )
       //self ! RabbitMessage(envelope.getDeliveryTag, properties.getReplyTo(), properties.getCorrelationId, headers, ByteString(body))
 
       // when we know this data is for this modules...
@@ -143,7 +159,9 @@ class RabbitModuleConsumer(val module: String, val channel: Channel, val mapper:
 
   override def postStop() = {
     //this might be too late and could cause losing some messages
-    channel.basicCancel(consumer.getConsumerTag())
-    channel.close()
+    println("ACTOR SHUTDOWN POST STOP !!!! ")
+    //channel.basicCancel(consumer.getConsumerTag())
+    //channel.close()
+
   }
 }

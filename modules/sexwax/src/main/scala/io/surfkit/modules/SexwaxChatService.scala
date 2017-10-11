@@ -8,7 +8,7 @@ import core.api.modules.SurfKitModule
 import io.surfkit.core.rabbitmq.RabbitDispatcher
 import io.surfkit.core.rabbitmq.RabbitDispatcher.RabbitMqAddress
 import io.surfkit.model.Auth.UserID
-import io.surfkit.model.Chat.{ChatEntry, ChatID}
+import io.surfkit.model.Chat.{ChatMember, ChatEntry, ChatID}
 import io.surfkit.model._
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -16,7 +16,7 @@ import scala.concurrent.Future
 
 // TODO: CA - I would like to use the "Cake" patter to do dependency injection here
 // TODO: Something like "with ChatBackend[ChatGraph] or with ChatBackend[ChatPostgres]" ..
-// TODO: this will allow use to seperate the api from the implementation details.. and provide a number of other storage providers..
+// TODO: this will allow use to seportate the api from the implementation details.. and provide a number of other storage providers..
 object SexwaxChatService extends App with SurfKitModule with ChatGraph with ChatStore{
   implicit lazy val system = ActorSystem("sexwax")
   println(s"System: $system")
@@ -53,7 +53,7 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
   }
 
 
-  def actions(r:Api.Request): PartialFunction[Model, Future[Api.Result]] = {
+  def actions(r:Api.Request): PartialFunction[Model, Future[Model]] = {
 
     /*
     case Chat.CreateGroup(name, permission, members) =>
@@ -68,14 +68,14 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
       }yield{
         val memberMap = chat.members.map(m => (m.jid, m)).toMap
         val chatWithEntries = Chat.Chat(chat.chatid,chat.members, entries.map(e => Chat.ChatEntry(e.chatid, e.chatentryid, e.timestamp, e.provider, e.json, memberMap.get(e.jid).getOrElse(Auth.ProfileInfo("","","Uknown","",e.jid,"")))))
-        Api.Result(0, r.module, r.op,  upickle.write[Chat.Chat](chatWithEntries), r.routing)
+        chatWithEntries
       }
 
     case Chat.GetChat(chatId) =>
       getMembersDetails(chatId) map {
         members =>
           val chat = Chat.Chat(chatId.chatId,members, Nil)
-          Api.Result(0, r.module, r.op,  upickle.write[Chat.Chat](chat), r.routing)
+          chat
       }
 
       /*
@@ -83,10 +83,10 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
       getGroups(userId) map answerJson(user, "groups") onFailure(answerFail)
     */
 
-    case Chat.MemberJoin(chatId, memberId) =>
-      connectMember(chatId, memberId) map{
+    case Chat.MemberJoin(chatId, jid) =>
+      connectMember(chatId, jid) map{
         join =>
-          Api.Result(0, r.module, r.op,  "", r.routing)
+          UnImplemented
       }
 
       /*
@@ -94,21 +94,20 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
       setChatOrGroupName(chatId,name)
     */
 
-    case Chat.ChatCreate(userId, members) => {
+    case Chat.ChatCreate(userId, members) =>
       println("ChatCreate")
-      val jid = s"$userId@APPID"
-      val memberSet = (jid :: members).toSet
+      val jid = s"$userId@${r.appId}"
       for{
-        cid <- createOrGetChatId(userId,jid,memberSet)
+        cid <- createOrGetChatId(userId,jid, (members+jid))
         chat <- getChat(cid)
       }yield{
         println(s"ChatCreate $cid, $chat")
         rooms += cid -> chat
-        Api.Result(0, r.module, r.op,  upickle.write(chat), r.routing)
+        chat
       }
-    }
 
-    case m @ Chat.ChatSend(userId, chatId, author, time, msg) => {
+
+    case m @ Chat.ChatSend(userId, chatId, author, time, msg) =>
       val provider = Providers.Walkabout // TODO : app provider ??
       for{
         chat <- getChat(chatId)
@@ -120,11 +119,11 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
         // TODO: send an "invite" to all non-app members..
         // chat.members.filterNot(_.provider=="APPID").foreach(u => INVITE ACTION)
         // Send message to all members
-        chat.members.filter(_.provider=="APPID").foreach(u => rabbitUserDispatcher ! RabbitDispatcher.SendUser(u.id.toLong,"APPID",Api.Request("chat","send",upickle.write(chatEntry), Api.Route("","",0L))))
-        Api.Result(0, r.module, r.op,  upickle.write(entry), r.routing)
+        //chat.members.filter(_.provider==r.appId).foreach(u => userDispatcher ! Api.SendUser(u.id.toLong,r.appId,Api.Request(r.appId, "chat","send",upickle.write(chatEntry), Api.Route("","",0L))))
+        // TODO: filter by app id
+        chat.members.foreach(u => userDispatcher ! Api.SendUser(u.id.toLong,r.appId,Api.Request(r.appId, "chat","send",upickle.write(chatEntry), Api.Route("","",0L))))
+        entry
       }
-    }
-
 
 
       /*
@@ -133,67 +132,55 @@ object SexwaxChatService extends App with SurfKitModule with ChatGraph with Chat
     */
 
 
-      /*
-    case Chat.GetChatList(uid, since) =>
+      // TODO: this could get inefficiant when the user has a large number of chats in the history
+      // TODO: I will need to revisit this at some point...
+    case Chat.GetRecentChatList(uid, since) =>
       val calendar = new GregorianCalendar()
       calendar.set(Calendar.YEAR, 2000) // before this app existed ..
     //could use an Option ?
-    val date = if( since == "" ) calendar.getTime else service.PostgresDataService.strToDate(since)
-      val both = for{
-        chatIds <- getChatsContainingUser(uid.toString)
-        entries <- getChatEntriesForChats(chatIds, date)
-        unread <- getUnreadChats(uid.toString)
-      }yield user ! Json.obj(
-          "entries" -> entries.map(_.toJson),
-          "unread" -> unread)
+      val date = if( since == "" ) calendar.getTime else strToDate(since)
+      for{
+        chatIds <- getChatMembersContainingUser(uid)
+        chatsGrouped = chatIds.groupBy(_.chatId).map{ case (k,v) => (k, v.map(ChatMember.toProfileInfo(_))) }
+        entries <- getChatEntriesForChats(chatsGrouped.keys.toSeq, date)
+        unread <- getUnreadChats(uid)
+      }yield {
+        val chats = entries.map{
+          e =>
+            val members = chatsGrouped(e.chatid)
+            val author = members.filter(_.jid == e.jid).headOption.getOrElse(Auth.UnknowProfile)
+            Chat.Chat(e.chatid, members, Seq(Chat.ChatEntry.create(e,author))  )
+        }
+        Chat.ChatList(chats)
+      }
 
-      both.onFailure(answerFail)
-    */
   }
+
 
 
   def mapper(r:Api.Request):Future[Api.Result] = {
     println("IN THE SEXWAX MAPPER ...")
-    r.op match {
+    (r.op match {
       //case "groups"        => actions(userId, sender)(GetUserGroups())
       case "groupcreate"   => actions(r)(upickle.read[Chat.CreateGroup](r.data.toString))
       case "history"       => actions(r)(upickle.read[Chat.GetHistory](r.data.toString))
       case "join"          => actions(r)(upickle.read[Chat.MemberJoin](r.data.toString))
-      case "list"          => actions(r)(upickle.read[Chat.GetChatList](r.data.toString))
+      case "list"          => actions(r)(upickle.read[Chat.GetRecentChatList](r.data.toString))
       case "get"           => actions(r)(upickle.read[Chat.GetChat](r.data.toString))
-      case "presense"      => actions(r)(upickle.read[Chat.ChatPresence](r.data.toString))
+      case "presense"      => actions(r)(upickle.read[Chat.ChatPresenceRequest](r.data.toString))
       case "send"          => actions(r)(upickle.read[Chat.ChatSend](r.data.toString))
       case "create"        => actions(r)(upickle.read[Chat.ChatCreate](r.data.toString))
       case "setname"       => actions(r)(upickle.read[Chat.SetChatOrGroupName](r.data.toString))
       case _ =>
-        logger.error("Unknown operation.")
-        Future.successful(Api.Result(1, r.module, r.op, upickle.write(Api.Error("Unknown operation.")), r.routing))
-    }
+        logger.error(s"Unknown operation.  ${r.op}")
+        Future.failed(new Exception(s"Unknown operation.  ${r.op}"))
+    }).map(d => Api.Result(0, r.module, r.op,  upickle.write(d), r.routing))
   }
 
-  val module = "chat"
+  def module = "chat"
 
-  // Let's Wax !
-  val rabbitDispatcher = system.actorOf(RabbitDispatcher.props(RabbitMqAddress(Configuration.hostRabbit, Configuration.portRabbit)))
-  rabbitDispatcher ! RabbitDispatcher.ConnectModule(module, mapper)  // connect to the MQ
-
-  // TODO: don't like the multiple dispatcher bit :(
-  val rabbitUserDispatcher = system.actorOf(RabbitDispatcher.props(RabbitMqAddress(Configuration.hostRabbit, Configuration.portRabbit)))
-  rabbitUserDispatcher ! RabbitDispatcher.Connect  // connect to the MQ
 
 }
 
 
 
-
-
-// Helper Config
-object Configuration {
-  import com.typesafe.config.ConfigFactory
-
-  private val config = ConfigFactory.load
-  config.checkValid(ConfigFactory.defaultReference)
-
-  lazy val hostRabbit = config.getString("rabbitmq.host")
-  lazy val portRabbit = config.getInt("rabbitmq.port")
-}
